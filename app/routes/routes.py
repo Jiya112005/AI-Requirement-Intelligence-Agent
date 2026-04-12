@@ -8,7 +8,7 @@ from app.services.file_services import extract_text_from_file,clean_text
 from app import app,db
 # importing the user model created
 from app.models.user import User,Document
-
+from app.services.llm_service import LLMService
 @app.route('/')
 @app.route('/index')
 def index():
@@ -132,3 +132,102 @@ def upload_document():
         }),202
         
     return jsonify({"error":"Invalid file type, only txt and pdf are allowed"}),400
+
+@app.route('/api/process/<int:doc_id>', methods=['POST'])
+@jwt_required()
+def process_document(doc_id):
+    """
+    Dedicated endpoint to trigger the AI pipeline on a previously uploaded document.
+    """
+    current_user_id = get_jwt_identity()
+
+    # 1. Fetch the document and ensure it belongs to the logged-in user
+    doc = Document.query.filter_by(id=doc_id, user_id=current_user_id).first()
+
+    if not doc:
+        return jsonify({"error": "Document not found or access denied"}), 404
+
+    if not doc.raw_text:
+        return jsonify({"error": "Document has no extractable text to process"}), 422
+
+    # Prevent re-processing already completed documents
+    if doc.status == 'CLARIFIED':
+        return jsonify({"message": "Document has already been processed."}), 200
+
+    print(f"[API] Starting Ollama Pipeline for Document ID: {doc.id}...")
+
+    # 2. Trigger Local Ollama Multi-Agent Pipeline (Synchronous)
+    extracted_reqs = LLMService.process_requirements_pipeline(doc.id, doc.raw_text)
+    
+    # 3. Update Status
+    if extracted_reqs:
+        doc.status = 'CLARIFIED'
+        message = "AI Processing complete. Requirements extracted."
+        status_code = 200
+    else:
+        doc.status = 'FAILED'
+        message = "AI Processing failed to extract valid requirements."
+        status_code = 500
+        
+    db.session.commit()
+
+    return jsonify({
+        "message": message,
+        "document_id": doc.id,
+        "requirements_extracted": len(extracted_reqs) if extracted_reqs else 0,
+        "new_status": doc.status
+    }), status_code
+
+@app.route('/api/history', methods=['GET'])
+@jwt_required()
+def get_user_history():
+    """STEP 3A: Fetches a high-level list of all past documents."""
+    current_user_id = get_jwt_identity()
+    
+    documents = Document.query.filter_by(user_id=current_user_id).order_by(Document.created_at.desc()).all()
+    
+    history = []
+    for doc in documents:
+        history.append({
+            "id": doc.id,
+            "filename": doc.file_path.split('/')[-1] if doc.file_path != 'pasted_email_text' else 'Pasted Text',
+            "status": doc.status,
+            "created_at": doc.created_at.strftime("%Y-%m-%d %H:%M:%S")
+        })
+        
+    return jsonify({"history": history}), 200
+
+
+@app.route('/api/document/<int:doc_id>', methods=['GET'])
+@jwt_required()
+def get_document_details(doc_id):
+    """STEP 3B: Fetches the deep AI-evaluated details of a specific document."""
+    current_user_id = get_jwt_identity()
+    
+    doc = Document.query.filter_by(id=doc_id, user_id=current_user_id).first()
+    
+    if not doc:
+        return jsonify({"error": "Document not found or access denied"}), 404
+        
+    reqs_data = []
+    for req in doc.requirements:
+        reqs_data.append({
+            "id": req.id,
+            "feature": req.feature,
+            "description": req.description,
+            "priority": req.priority,
+            "feasibility": req.feasibility,
+            "risks": req.risks,
+            "clarity_score": req.clarity_score,
+            # Safely parse JSON strings back to lists
+            "ambiguous_terms": json.loads(req.ambiguous_terms) if req.ambiguous_terms else [],
+            "missing_info": json.loads(req.missing_info) if req.missing_info else [],
+            "clarification_questions": json.loads(req.clarification_questions) if req.clarification_questions else []
+        })
+        
+    return jsonify({
+        "document_id": doc.id,
+        "status": doc.status,
+        "raw_text_snippet": doc.raw_text[:200] + "..." if doc.raw_text else None,
+        "requirements": reqs_data
+    }), 200
