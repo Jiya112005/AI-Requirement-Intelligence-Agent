@@ -6,6 +6,7 @@ from flask_jwt_extended import create_access_token,jwt_required,get_jwt_identity
 from app.services.file_services import extract_text_from_file,clean_text
 #importing app binded and db 
 from app import app,db
+from app.tasks import process_document_task
 # importing the user model created
 from app.models.user import User,Document
 from app.services.llm_service import LLMService
@@ -153,30 +154,21 @@ def process_document(doc_id):
     # Prevent re-processing already completed documents
     if doc.status == 'CLARIFIED':
         return jsonify({"message": "Document has already been processed."}), 200
+    if doc.status == 'PROCESSING':
+        return jsonify({"message":"Document is currently being processed."})
 
-    print(f"[API] Starting Ollama Pipeline for Document ID: {doc.id}...")
+    print(f"[API] Dispatching Document ID:{doc.id} to Celery Worker...")
 
-    # 2. Trigger Local Ollama Multi-Agent Pipeline (Synchronous)
-    extracted_reqs = LLMService.process_requirements_pipeline(doc.id, doc.raw_text)
-    
-    # 3. Update Status
-    if extracted_reqs:
-        doc.status = 'CLARIFIED'
-        message = "AI Processing complete. Requirements extracted."
-        status_code = 200
-    else:
-        doc.status = 'FAILED'
-        message = "AI Processing failed to extract valid requirements."
-        status_code = 500
-        
+    process_document_task.delay(doc.id)
+
+    doc.status = 'PROCESSING'
     db.session.commit()
 
     return jsonify({
-        "message": message,
+        "message": "AI processing started in background",
         "document_id": doc.id,
-        "requirements_extracted": len(extracted_reqs) if extracted_reqs else 0,
-        "new_status": doc.status
-    }), status_code
+        "status": doc.status
+    }),202
 
 @app.route('/api/history', methods=['GET'])
 @jwt_required()

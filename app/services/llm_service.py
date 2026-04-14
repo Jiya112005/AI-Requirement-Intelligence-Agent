@@ -14,7 +14,7 @@ class LLMService:
             Each object must have: "feature" (string), "description" (string), and "priority" (string: High/Medium/Low).
         """
         response = ollama.chat(
-            model='llama3',
+            model='phi3',
             messages=[
                 {'role':'system','content':prompt},
                 {'role':'user','content':raw_text}
@@ -37,7 +37,7 @@ class LLMService:
         - "clarification_questions" (list of 1-2 questions to ask the client)
         """
         response = ollama.chat(
-            model='llama3',
+            model='phi3',
             messages=[
                 {'role': 'system', 'content': prompt},
                 {'role': 'user', 'content': json.dumps(feature_list)}
@@ -59,7 +59,7 @@ class LLMService:
             -"risks"(string)
          """
         response = ollama.chat(
-            model = "llama3",
+            model = "phi3",
             messages = [
                 {"role":"system","content":prompt},
                 {"role":"user","content":json.dumps(feature_list)}
