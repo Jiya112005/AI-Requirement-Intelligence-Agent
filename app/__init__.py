@@ -18,15 +18,17 @@ app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///app.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config['JWT_SECRET_KEY'] = os.getenv('JWT_SECRET_KEY')
 
-app.config['CELERY_BROKER_URL'] = 'redis://localhost:6379/0'
-app.config['CELERY_RESULT_BACKEND'] = 'redis://localhost:6379/0'
+app.config['broker_url'] = 'sqla+sqlite:///celerydb.sqlite'
+app.config['result_backend'] = 'db+sqlite:///celerydb.sqlite'
+
 
 # bind the extension with app
 db.init_app(app)
 jwt.init_app(app)
 
-celery = Celery(app.name,broker=app.config['CELERY_BROKER_URL'])
+celery = Celery(app.name, broker=app.config['broker_url'])
 celery.conf.update(app.config)
+
 
 class ContextTask(celery.Task):
     def __call__(self,*args,**kwargs):

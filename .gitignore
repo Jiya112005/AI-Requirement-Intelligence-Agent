@@ -4,3 +4,8 @@ __pycache__
 uploads
 instance
 .git
+celerydb.sqlite
+app.db
+*.pyc
+*.pyo
+*.pyd

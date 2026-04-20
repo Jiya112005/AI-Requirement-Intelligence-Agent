@@ -1,8 +1,16 @@
-import ollama
 import json
+import os 
+from groq import Groq 
 from app.models.user import Requirement
 from app import db
+from dotenv import load_dotenv
 
+load_dotenv()
+# creating the client for GROK
+GROQ_MODEL = "llama-3.3-70b-versatile"
+client = Groq(
+    api_key = os.getenv('GROQ_API_KEY')
+)
 class LLMService:
     @staticmethod
     def agent_extractor(raw_text):
@@ -13,15 +21,15 @@ class LLMService:
             Output ONLY Json with a 'requirements' key containing a list of objects.
             Each object must have: "feature" (string), "description" (string), and "priority" (string: High/Medium/Low).
         """
-        response = ollama.chat(
-            model='phi3',
+        response = client.chat.completions.create(
+            model=GROQ_MODEL,
             messages=[
                 {'role':'system','content':prompt},
                 {'role':'user','content':raw_text}
             ],
-            format = 'json'
+            response_format = {'type':'json_object'}
         )
-        return json.loads(response['message']['content']).get('requirements',[])
+        return json.loads(response.choices[0].message.content).get('requirements',[])
     
     @staticmethod
     def agent_clarifier(feature_list):
@@ -36,15 +44,15 @@ class LLMService:
         - "missing_info" (list of strings)
         - "clarification_questions" (list of 1-2 questions to ask the client)
         """
-        response = ollama.chat(
-            model='phi3',
+        response = client.chat.completions.create(
+            model=GROQ_MODEL,
             messages=[
                 {'role': 'system', 'content': prompt},
                 {'role': 'user', 'content': json.dumps(feature_list)}
             ],
-            format='json'
+            response_format = {'type':'json_object'}
         )
-        return json.loads(response['message']['content']).get('clarifications', [])
+        return json.loads(response.choices[0].message.content).get('clarifications', [])
     
     @staticmethod
     def agent_feasibility(feature_list):
@@ -58,15 +66,15 @@ class LLMService:
             -"dependencies"(string)
             -"risks"(string)
          """
-        response = ollama.chat(
-            model = "phi3",
+        response = client.chat.completions.create(
+            model = GROQ_MODEL,
             messages = [
                 {"role":"system","content":prompt},
                 {"role":"user","content":json.dumps(feature_list)}
             ],
-            format = 'json'
+            response_format = {'type':'json_object'}
          )
-        return json.loads(response['message']['content']).get('feasibility_report',[])
+        return json.loads(response.choices[0].message.content).get('feasibility_report',[])
     
     @classmethod
     def process_requirements_pipeline(cls,document_id,raw_text):
@@ -101,7 +109,7 @@ class LLMService:
 
                     # from clarifier agent
                     clarity_score=float(clarity_data.get('clarity_score',0.5)),
-                    ambiguous_terms = json.dumps(clarity_data.get('ambigous_terms',[])),
+                    ambiguous_terms = json.dumps(clarity_data.get('ambiguous_terms', [])),
                     missing_info = json.dumps(clarity_data.get("missing_info",[])),
                     clarification_questions=json.dumps(clarity_data.get('clarification_questions',[]))
 
