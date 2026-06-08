@@ -73,9 +73,74 @@ ALLOWED_EXTENSIONS = {'pdf', 'txt'}
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
-@app.route('/api/upload',methods=['POST'])
+@app.route('/api/upload', methods=['POST'])
 @jwt_required() 
 def upload_document():
+    current_user_id = get_jwt_identity()
+    print(f"--- DEBUG START ---")
+    print(f"Content-Type: {request.content_type}")
+    print(f"Files found: {request.files.keys()}")
+    print(f"Is JSON: {request.is_json}")
+    print(f"--- DEBUG END ---")
+    # 1. PRIORITIZE FILE UPLOADS
+    if 'file' in request.files:
+        file = request.files['file']
+        
+        if file.filename == '':
+            return jsonify({"error": "No selected file"}), 400
+            
+        if file and allowed_file(file.filename):
+            filename = secure_filename(file.filename)
+            os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+            file_path = os.path.join(UPLOAD_FOLDER, filename)
+            file.save(file_path)
+
+            raw_text = extract_text_from_file(file_path, filename)
+            if not raw_text:
+                return jsonify({"error": "Could not extract text from file"}), 422
+                
+            new_doc = Document(
+                user_id=current_user_id,
+                file_path=file_path,
+                status="UPLOADED",
+                raw_text=clean_text(raw_text)
+            )
+            db.session.add(new_doc)
+            db.session.commit()
+
+            return jsonify({
+                "message": "File uploaded and text extracted successfully",
+                "document_id": new_doc.id,
+                "status": new_doc.status
+            }), 202
+        else:
+            return jsonify({"error": "Invalid file type, only txt and pdf are allowed"}), 400
+
+    # 2. FALLBACK TO JSON (Pasted Text)
+    if request.is_json:
+        data = request.get_json()
+        raw_text = data.get('text')
+
+        if not raw_text:
+            return jsonify({"error": "No text provided in JSON body"}), 400
+
+        new_doc = Document(
+            user_id=current_user_id,
+            file_path="pasted_email_text",
+            status="UPLOADED",
+            raw_text=clean_text(raw_text)
+        ) 
+        db.session.add(new_doc)
+        db.session.commit()
+
+        return jsonify({
+            "message": "Raw Text ingested successfully",
+            "document_id": new_doc.id,
+            "status": new_doc.status
+        }), 202
+
+    # 3. CATCH-ALL ERROR
+    return jsonify({"error": "No file or valid JSON text found in the request body"}), 400
     current_user_id = get_jwt_identity()
 
     # If user pasted raw text or email
@@ -180,6 +245,9 @@ def get_user_history():
     documents = Document.query.filter_by(user_id=current_user_id).order_by(Document.created_at.desc()).all()
     
     history = []
+    if not documents:
+        return jsonify({"message":"No history found"}),200
+
     for doc in documents:
         history.append({
             "id": doc.id,
